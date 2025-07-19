@@ -1,195 +1,180 @@
-# Trace Anomaly Detection System
+# Trace Anomaly Detection
 
-A deep learning-based trace anomaly detection tool for distributed systems using Graph Attention Networks (GAT) with dual reconstruction loss.
+A microservice trace anomaly detection tool based on Graph Neural Networks. This project uses Graph Attention Networks (GAT) to perform anomaly detection on microservice trace data.
 
 ## Features
 
-- **Graph-based Structure**: Uses GAT to process graph structural features of traces
-- **Dual Reconstruction Loss**: Combines structural reconstruction loss and feature reconstruction loss
-- **Engineering Design**: Modular architecture, easy to extend and maintain
-- **Multiple Interfaces**: Supports both Python API and command-line interface
-- **Performance Evaluation**: Built-in evaluation tools and visualization features
+- Anomaly detection based on Graph Attention Network (GAT)
+- Support for structured and attributed modeling of microservice trace data
+- Automated model training and evaluation pipeline
+- Rich evaluation metrics and visualization charts
+- Support for multiple aggregation methods in prediction
 
-## System Architecture
+## Dependencies
 
-```
-ad/
-├── config.py          # Configuration classes
-├── data_processor.py  # Data preprocessing
-├── models.py          # Deep learning models
-├── detector.py        # Main detector
-├── evaluation.py      # Evaluation tools
-├── utils.py           # Utility functions
-├── cli.py             # Command line interface
-├── train_with_parquet.py # Training script
-└── README.md          # Documentation
-```
+The project uses Python 3.13+ and depends on the following main libraries:
 
-## Quick Start
+- PyTorch & PyTorch Geometric: Deep learning framework
+- Pandas & NumPy: Data processing
+- Scikit-learn: Machine learning evaluation
+- Matplotlib: Visualization
+- Typer: Command line interface
 
-### 1. Install Dependencies
+## Installation
+
+Install dependencies using uv:
 
 ```bash
-pip install torch torch-geometric scikit-learn pandas numpy tqdm joblib matplotlib
-```
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-### 2. Use Python API
-
-```python
-from config import ModelConfig, TraceDataConfig
-from detector import TraceAnomalyDetector
-
-# Configure model
-config = ModelConfig(
-    epochs=150,
-    learning_rate=0.005,
-    latent_dim=16,
-    loss_alpha=0.6
-)
-
-# Create detector
-detector = TraceAnomalyDetector(config)
-
-# Train model
-detector.fit(train_df)
-
-# Predict anomaly scores
-scores = detector.predict_score(test_df)
-
-# Save model
-detector.save("./model")
-```
-
-### 3. Use Command Line Interface
-
-```bash
-# Train model
-python cli.py train --data train_data.parquet --output ./model --epochs 150
-
-# Predict anomaly scores
-python cli.py predict --model ./model --data test_data.parquet --output results.csv
-
-# Evaluate model performance
-python cli.py evaluate --model ./model --normal-data normal.parquet --anomaly-data anomaly.parquet
-```
-
-### 4. Run Training Script
-
-```bash
-python train_with_parquet.py
+# Install project dependencies
+uv sync
 ```
 
 ## Data Format
 
-Input data should contain the following columns:
+Training and testing data should be in Parquet format and contain the following fields:
 
-### Required Fields
+**Required fields:**
 - `trace_id`: Trace ID
 - `span_id`: Span ID  
-- `parent_span_id`: Parent span ID
+- `parent_span_id`: Parent Span ID
 - `span_name`: Span name
-- `service_name`: Service name
+- `primary_service`: Primary service name
+- `start_time`: Start time
 - `duration`: Duration
 
-### Optional Fields
-- `attr.http.request.method`: HTTP request method
-- `attr.http.response.status_code`: HTTP response status code
-- `attr.span_kind`: Span type
-- `attr.k8s.pod.name`: Kubernetes Pod name
-- `attr.k8s.service.name`: Kubernetes Service name
-- `attr.k8s.namespace.name`: Kubernetes namespace
-- Other custom attributes
+**Aggregated feature fields:**
+- `span_count`: Number of spans
+- `total_duration`: Total duration
+- `avg_duration`: Average duration
+- `max_duration`: Maximum duration
+- `min_duration`: Minimum duration
+- `duration_std`: Duration standard deviation
+- `unique_services`: Number of unique services
+- `unique_spans`: Number of unique spans
+- `error_rate`: Error rate
+- `root_span`: Root span name
 
-## Model Configuration
+## Usage
 
-```python
-# Basic configuration
-config = ModelConfig(
-    # Feature configuration
-    categorical_features=['primary_service', 'root_span'],
-    numerical_features=['span_count', 'total_duration', 'avg_duration', 
-                       'max_duration', 'min_duration', 'duration_std',
-                       'unique_services', 'unique_spans', 'error_rate'],
-    
-    # Model parameters
-    latent_dim=16,        # Latent space dimension
-    gat_heads=4,          # Number of GAT attention heads
-    
-    # Training parameters
-    epochs=100,           # Number of epochs
-    learning_rate=0.005,  # Learning rate
-    batch_size=1,         # Batch size
-    loss_alpha=0.6,       # Loss weight
-)
+### Model Training
 
-# Extended configuration
-trace_config = TraceDataConfig(
-    missing_value_strategy='fill',  # Missing value handling strategy
-    categorical_fill_value='N/A',   # Categorical feature fill value
-    numerical_fill_value=0.0,       # Numerical feature fill value
-)
+Train anomaly detection model using training data:
+
+```bash
+# Basic training command
+uv run python cli.py train --data data/training_data.parquet
+
+# Custom training parameters
+uv run python cli.py train \
+    --data data/training_data.parquet \
+    --output models \
+    --epochs 150 \
+    --learning-rate 0.001 \
+    --latent-dim 32 \
+    --batch-size 2
 ```
 
-## Core Components
+**Training parameter description:**
+- `--data`: Training data file path (required)
+- `--output`: Model output directory (default: models)
+- `--epochs`: Number of training epochs (default: 100)
+- `--learning-rate`: Learning rate (default: 0.005)
+- `--latent-dim`: Latent space dimension (default: 16)
+- `--batch-size`: Batch size (default: 1)
 
-### 1. Data Processor (DataProcessor)
-- Data cleaning and preprocessing
-- Feature encoding and standardization
-- Graph structure construction
+After training is complete, model files will be saved in the specified output directory:
+- `model.pth`: Trained neural network model
+- `processor.joblib`: Data preprocessor
+- `config.joblib`: Model configuration
+- `trace_config.joblib`: Data configuration
 
-### 2. Models
-- **GATEncoder**: Graph Attention Network encoder
-- **FeatureDecoder**: Feature reconstruction decoder
-- **AdvancedGAE**: Combined graph autoencoder
+### Model Evaluation
 
-### 3. Detector (TraceAnomalyDetector)
-- Model training and prediction
-- Model saving and loading
-- Batch processing support
+Perform anomaly detection evaluation on test data:
 
-### 4. Evaluator (ModelEvaluator)
-- Performance evaluation metrics
-- Visualization analysis
-- Evaluation report generation
+```bash
+# Basic evaluation command
+uv run python cli.py evaluate
 
-## Evaluation Metrics
-
-- **Separation Ratio**: Ratio of anomaly scores to normal scores
-- **ROC AUC**: Area under the ROC curve
-- **Score Distribution**: Distribution of normal and anomaly sample scores
-- **Statistics**: Mean, standard deviation, percentiles, etc.
-
-## Performance Optimization
-
-1. **GPU Acceleration**: Automatic GPU detection and usage
-2. **Early Stopping**: Prevents overfitting
-3. **Learning Rate Scheduling**: Dynamic learning rate adjustment
-4. **Batch Processing**: Supports large-scale data processing
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Out of Memory**: Reduce batch_size or latent_dim
-2. **Training Not Converging**: Adjust learning_rate or loss_alpha
-3. **Poor Separation**: Increase epochs or adjust model architecture
-4. **Data Format Error**: Check if required fields exist
-
-### Debugging Tips
-
-```python
-# Check model info
-model_info = detector.get_model_info()
-print(f"Model parameters: {model_info['model_parameters']}")
-
-# Check feature info
-feature_info = detector.processor.get_feature_info()
-print(f"Feature info: {feature_info}")
-
-# Verbose logging
-detector.fit(train_df, verbose=True)
+# Specify model and aggregation method
+uv run python cli.py evaluate \
+    --model models \
+    --aggregation max \
+    --output-dir evaluation_results
 ```
 
-## License
+**Evaluation parameter description:**
+- `--model`: Model directory path (default: models)
+- `--aggregation`: Aggregation method, options: max, mean, percentile_95 (default: max)
+- `--output-dir`: Evaluation results output directory (default: evaluation_results)
 
-MIT License
+**Test data structure requirements:**
+```
+data/test/
+├── dataset1/
+│   ├── normal_traces.parquet
+│   └── abnormal_traces.parquet
+├── dataset2/
+│   ├── normal_traces.parquet
+│   └── abnormal_traces.parquet
+└── ...
+```
+
+### Evaluation Results
+
+After evaluation is complete, the following files will be generated:
+
+1. **evaluation_results.json**: Detailed evaluation metrics
+2. **confusion_matrix.png**: Confusion matrix chart
+3. **roc_curve.png**: ROC curve chart
+4. **precision_recall_curve.png**: Precision-recall curve chart
+5. **score_distribution.png**: Anomaly score distribution chart
+
+**Main evaluation metrics:**
+- ROC AUC: Area under the receiver operating characteristic curve
+- Precision: Proportion of predicted anomalies that are actually anomalous
+- Recall: Proportion of actual anomalies that are correctly predicted
+- F1 Score: Harmonic mean of precision and recall
+- Specificity: Proportion of normal samples correctly identified
+
+## Project Architecture
+
+```
+├── cli.py              # Command line interface
+├── config.py           # Configuration class definitions
+├── detector.py         # Main anomaly detector class
+├── data_processor.py   # Data preprocessing module
+├── models.py           # Neural network model definitions
+├── evaluation.py       # Model evaluation module
+├── utils.py            # Utility functions
+├── pyproject.toml      # Project configuration
+└── README.md           # Project documentation
+```
+
+## Model Principle
+
+This project implements an anomaly detection method based on Graph Attention Networks:
+
+1. **Data Preprocessing**: Convert trace data into graph structure, where nodes represent spans and edges represent call relationships
+2. **Feature Engineering**: Extract categorical and numerical features, perform standardization
+3. **Graph Encoding**: Use GAT encoder to learn latent representations of graph structure
+4. **Reconstruction Decoding**: Reconstruct original features and graph structure through decoder
+5. **Anomaly Detection**: Calculate anomaly scores based on reconstruction error
+
+## Example Workflow
+
+```bash
+# 1. Train model
+uv run python cli.py train --data data/normal_traces.parquet --epochs 200
+
+# 2. Evaluate model
+uv run python cli.py evaluate --aggregation max
+
+# 3. View results
+ls evaluation_results/
+# Output: confusion_matrix.png, roc_curve.png, precision_recall_curve.png, ...
+```
+
