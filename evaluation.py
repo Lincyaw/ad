@@ -4,8 +4,17 @@ Evaluation module for model performance evaluation and visualization.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List, Dict, Any, Optional
-from sklearn.metrics import roc_auc_score, precision_recall_curve, roc_curve
+from typing import List, Dict, Any, Optional, Tuple
+from sklearn.metrics import (
+    roc_auc_score,
+    precision_recall_curve,
+    roc_curve,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+    classification_report,
+)
 
 from utils import log_message, calculate_statistics
 
@@ -15,6 +24,105 @@ class ModelEvaluator:
 
     def __init__(self) -> None:
         self.evaluation_results: Dict[str, Any] = {}
+
+    def evaluate_with_threshold(
+        self, scores: List[float], labels: List[int], threshold: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Evaluate model performance with binary classification threshold."""
+        labels_arr = np.array(labels)
+        scores_arr = np.array(scores)
+
+        if threshold is None:
+            fpr, tpr, thresholds = roc_curve(labels_arr, scores_arr)
+            j_scores = tpr - fpr
+            optimal_idx = np.argmax(j_scores)
+            threshold = thresholds[optimal_idx]
+
+        # Binary predictions based on threshold
+        predictions = (scores_arr >= threshold).astype(int)
+
+        # Calculate metrics
+        precision = precision_score(labels_arr, predictions)
+        recall = recall_score(labels_arr, predictions)
+        f1 = f1_score(labels_arr, predictions)
+
+        # Confusion matrix
+        cm = confusion_matrix(labels_arr, predictions)
+        tn, fp, fn, tp = cm.ravel()
+
+        # Additional metrics
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+
+        # ROC AUC
+        try:
+            auc_score = roc_auc_score(labels_arr, scores_arr)
+        except ValueError:
+            auc_score = None
+
+        results = {
+            "threshold": threshold,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
+            "specificity": specificity,
+            "accuracy": accuracy,
+            "auc_score": auc_score,
+            "confusion_matrix": {
+                "tn": int(tn),
+                "fp": int(fp),
+                "fn": int(fn),
+                "tp": int(tp),
+            },
+            "classification_report": classification_report(
+                labels_arr, predictions, output_dict=True
+            ),
+        }
+
+        self.evaluation_results = results
+        return results
+
+    def load_labeled_data(
+        self, file_paths: List[str], labels: List[int], detector=None
+    ) -> Tuple[List[float], List[int]]:
+        """Load data from multiple files with corresponding labels."""
+        all_scores = []
+        all_labels = []
+
+        for file_path, label in zip(file_paths, labels):
+            try:
+                import pandas as pd
+
+                df = pd.read_parquet(file_path)
+
+                # Use detector to get anomaly scores if provided
+                if detector is not None:
+                    # Convert DataFrame to the format expected by detector
+                    traces = df.to_dict("records")
+                    scores = []
+                    for trace in traces:
+                        try:
+                            score = detector.detect_anomaly(trace)
+                            scores.append(score)
+                        except Exception as e:
+                            log_message(
+                                f"Error detecting anomaly for trace: {e}", "WARNING"
+                            )
+                            scores.append(0.0)  # Default score on error
+                else:
+                    # If no detector provided, use placeholder scores
+                    log_message(
+                        "No detector provided, using placeholder scores", "WARNING"
+                    )
+                    scores = [0.0] * len(df)  # Placeholder
+
+                all_scores.extend(scores)
+                all_labels.extend([label] * len(df))
+
+            except Exception as e:
+                log_message(f"Error loading {file_path}: {e}", "ERROR")
+
+        return all_scores, all_labels
 
     def evaluate_anomaly_detection(
         self, normal_scores: List[float], anomaly_scores: List[float]
@@ -145,48 +253,6 @@ class ModelEvaluator:
             if len(complexities) > 1
             else 0,
         }
-
-    def generate_evaluation_report(
-        self, normal_scores: List[float], anomaly_scores: List[float]
-    ) -> str:
-        """Generate evaluation report."""
-        results = self.evaluate_anomaly_detection(normal_scores, anomaly_scores)
-
-        report = f"""
-=== Anomaly Detection Model Evaluation Report ===
-
-Data Statistics:
-- Normal samples: {results["num_normal"]}
-- Anomaly samples: {results["num_anomaly"]}
-
-Normal Sample Score Statistics:
-- Mean: {results["normal_stats"]["mean"]:.6f}
-- Std: {results["normal_stats"]["std"]:.6f}
-- Min: {results["normal_stats"]["min"]:.6f}
-- Max: {results["normal_stats"]["max"]:.6f}
-
-Anomaly Sample Score Statistics:
-- Mean: {results["anomaly_stats"]["mean"]:.6f}
-- Std: {results["anomaly_stats"]["std"]:.6f}
-- Min: {results["anomaly_stats"]["min"]:.6f}
-- Max: {results["anomaly_stats"]["max"]:.6f}
-
-Model Performance:
-- Separation Ratio: {results["separation_ratio"]:.3f}
-
-Evaluation Conclusion:
-"""
-
-        if results["separation_ratio"] > 2.0:
-            report += (
-                "✓ Model successfully distinguishes between normal and anomaly samples"
-            )
-        elif results["separation_ratio"] > 1.5:
-            report += "⚠ Model partially distinguishes normal and anomaly samples, tuning recommended"
-        else:
-            report += "✗ Model failed to effectively distinguish normal and anomaly samples, retraining needed"
-
-        return report
 
     def save_evaluation_results(self, filepath: str) -> None:
         """Save evaluation results."""

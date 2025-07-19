@@ -48,18 +48,13 @@ def calculate_statistics(scores: List[float]) -> Dict[str, float]:
 
 
 def validate_trace_data(df: pd.DataFrame) -> bool:
-    """Validate trace data format."""
     required_columns = ["trace_id", "span_id", "parent_span_id"]
-
     for col in required_columns:
         if col not in df.columns:
             log_message(f"Missing required column: {col}", "ERROR")
             return False
-
-    # Check for empty trace_id values
     if df["trace_id"].isna().any():
         log_message("Found null trace_id values", "WARNING")
-
     return True
 
 

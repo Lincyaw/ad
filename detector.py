@@ -116,7 +116,6 @@ class TraceAnomalyDetector:
             log_message("Training completed successfully.")
 
     def predict_score(self, df) -> List[Dict[str, Any]]:
-        """Predict anomaly scores for given data."""
         if not self.is_trained or self.model is None:
             raise RuntimeError("Model is not trained. Call fit() first.")
 
@@ -151,6 +150,85 @@ class TraceAnomalyDetector:
                     }
                 )
         return results
+
+    def predict_aggregated(
+        self, df, aggregation_method: str = "max", threshold: Optional[float] = None
+    ) -> Dict[str, Any]:
+        window_results = self.predict_score(df)
+
+        if not window_results:
+            return {
+                "has_anomaly": False,
+                "anomaly_score": 0.0,
+                "confidence": 0.0,
+                "num_windows": 0,
+                "aggregation_method": aggregation_method,
+            }
+
+        # Extract scores
+        anomaly_scores = [r["anomaly_score"] for r in window_results]
+        struct_errors = [r["struct_error"] for r in window_results]
+        feature_errors = [r["feature_error"] for r in window_results]
+
+        # Aggregate scores based on method
+        if aggregation_method == "max":
+            agg_score = max(anomaly_scores)
+            agg_struct = max(struct_errors)
+            agg_feat = max(feature_errors)
+        elif aggregation_method == "mean":
+            agg_score = sum(anomaly_scores) / len(anomaly_scores)
+            agg_struct = sum(struct_errors) / len(struct_errors)
+            agg_feat = sum(feature_errors) / len(feature_errors)
+        elif aggregation_method == "percentile_95":
+            import numpy as np
+
+            agg_score = float(np.percentile(anomaly_scores, 95))
+            agg_struct = float(np.percentile(struct_errors, 95))
+            agg_feat = float(np.percentile(feature_errors, 95))
+        else:
+            raise ValueError(f"Unsupported aggregation method: {aggregation_method}")
+
+        # Calculate confidence (normalized consistency measure)
+        if len(anomaly_scores) > 1:
+            import numpy as np
+
+            scores_array = np.array(anomaly_scores)
+            # Use coefficient of variation (CV) for relative variability
+            mean_score = np.mean(scores_array)
+            if mean_score > 0:
+                cv = np.std(scores_array) / mean_score  # Coefficient of variation
+                confidence = 1.0 / (
+                    1.0 + cv
+                )  # Higher confidence for lower relative variance
+            else:
+                confidence = 1.0
+        else:
+            confidence = 1.0
+
+        result = {
+            "anomaly_score": agg_score,
+            "struct_error": agg_struct,
+            "feature_error": agg_feat,
+            "confidence": confidence,
+            "num_windows": len(window_results),
+            "aggregation_method": aggregation_method,
+            "window_scores": anomaly_scores,  # Keep individual window scores for analysis
+            "score_statistics": {
+                "min": float(min(anomaly_scores)),
+                "max": float(max(anomaly_scores)),
+                "mean": float(sum(anomaly_scores) / len(anomaly_scores)),
+                "std": float(np.std(anomaly_scores))
+                if len(anomaly_scores) > 1
+                else 0.0,
+            },
+        }
+
+        # Add binary classification if threshold is provided
+        if threshold is not None:
+            result["has_anomaly"] = agg_score >= threshold
+            result["threshold"] = threshold
+
+        return result
 
     def predict_batch(self, df, batch_size: int = 32) -> List[Dict[str, Any]]:
         """Batch prediction for large datasets."""
@@ -228,7 +306,6 @@ class TraceAnomalyDetector:
         detector.model = model
         detector.is_trained = True
 
-        log_message(f"Model loaded from {directory}")
         return detector
 
     def get_model_info(self) -> Dict[str, Any]:
