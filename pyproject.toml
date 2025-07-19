@@ -1,0 +1,27 @@
+[project]
+name = "ad"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastparquet>=2024.11.0",
+    "joblib>=1.5.1",
+    "matplotlib>=3.10.3",
+    "numpy>=2.3.1",
+    "pandas>=2.3.1",
+    "pyarrow>=21.0.0",
+    "rcabench-platform>=0.3.7",
+    "scikit-learn>=1.7.1",
+    "torch>=2.7.1",
+    "torch-geometric>=2.6.1",
+    "pysync>=0.4.0"
+]
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+]
+[tool.uv.sources.pysync]
+git = "https://github.com/kedvall/pysync"
+rev = "4384b546c40e5cd773ff9e8fde7337045618e9d6"
