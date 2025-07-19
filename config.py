@@ -1,7 +1,3 @@
-"""
-Configuration file defining model and training configuration parameters.
-"""
-
 import torch
 from dataclasses import dataclass, field
 from typing import List
@@ -9,9 +5,6 @@ from typing import List
 
 @dataclass
 class ModelConfig:
-    """Configuration for model and training parameters."""
-
-    # Optimized trace-level feature configuration
     categorical_features: List[str] = field(
         default_factory=lambda: [
             "primary_service",
@@ -32,10 +25,9 @@ class ModelConfig:
         ]
     )
 
-    # GAT model configuration
-    in_channels: int = -1  # Will be dynamically determined after preprocessing
-    latent_dim: int = 16  # Latent space dimension after compression
-    gat_heads: int = 4  # Number of multi-head attention heads in GAT
+    in_channels: int = -1
+    latent_dim: int = 16
+    gat_heads: int = 4
 
     # Training configuration
     learning_rate: float = 0.005
@@ -52,7 +44,6 @@ class ModelConfig:
 class TraceDataConfig:
     """Configuration for trace data."""
 
-    # Extended support for more trace fields
     extended_categorical_features: List[str] = field(
         default_factory=lambda: [
             "span_name",

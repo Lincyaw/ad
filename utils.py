@@ -33,8 +33,7 @@ def format_trace_data(trace_dict: Dict[str, Any]) -> str:
 
 def calculate_statistics(scores: List[float]) -> Dict[str, float]:
     """Calculate score statistics."""
-    if not scores:
-        return {}
+    assert scores, "Scores list cannot be empty"
 
     return {
         "mean": float(np.mean(scores)),
@@ -50,11 +49,8 @@ def calculate_statistics(scores: List[float]) -> Dict[str, float]:
 def validate_trace_data(df: pd.DataFrame) -> bool:
     required_columns = ["trace_id", "span_id", "parent_span_id"]
     for col in required_columns:
-        if col not in df.columns:
-            log_message(f"Missing required column: {col}", "ERROR")
-            return False
-    if df["trace_id"].isna().any():
-        log_message("Found null trace_id values", "WARNING")
+        assert col in df.columns, f"Missing required column: {col}"
+    assert not df["trace_id"].isna().any(), "Found null trace_id values"
     return True
 
 

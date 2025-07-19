@@ -20,23 +20,19 @@ from utils import log_message, calculate_statistics
 
 
 class ModelEvaluator:
-    """Model evaluator for anomaly detection performance."""
-
     def __init__(self) -> None:
         self.evaluation_results: Dict[str, Any] = {}
 
     def evaluate_with_threshold(
-        self, scores: List[float], labels: List[int], threshold: Optional[float] = None
+        self, scores: List[float], labels: List[int]
     ) -> Dict[str, Any]:
-        """Evaluate model performance with binary classification threshold."""
         labels_arr = np.array(labels)
         scores_arr = np.array(scores)
 
-        if threshold is None:
-            fpr, tpr, thresholds = roc_curve(labels_arr, scores_arr)
-            j_scores = tpr - fpr
-            optimal_idx = np.argmax(j_scores)
-            threshold = thresholds[optimal_idx]
+        fpr, tpr, thresholds = roc_curve(labels_arr, scores_arr)
+        j_scores = tpr - fpr
+        optimal_idx = np.argmax(j_scores)
+        threshold = thresholds[optimal_idx]
 
         # Binary predictions based on threshold
         predictions = (scores_arr >= threshold).astype(int)
@@ -55,10 +51,9 @@ class ModelEvaluator:
         accuracy = (tp + tn) / (tp + tn + fp + fn)
 
         # ROC AUC
-        try:
-            auc_score = roc_auc_score(labels_arr, scores_arr)
-        except ValueError:
-            auc_score = None
+        auc_score = roc_auc_score(
+            labels_arr, scores_arr
+        )  # Will assert if not enough classes
 
         results = {
             "threshold": threshold,
@@ -90,37 +85,21 @@ class ModelEvaluator:
         all_labels = []
 
         for file_path, label in zip(file_paths, labels):
-            try:
-                import pandas as pd
+            import pandas as pd
 
-                df = pd.read_parquet(file_path)
+            df = pd.read_parquet(file_path)
 
-                # Use detector to get anomaly scores if provided
-                if detector is not None:
-                    # Convert DataFrame to the format expected by detector
-                    traces = df.to_dict("records")
-                    scores = []
-                    for trace in traces:
-                        try:
-                            score = detector.detect_anomaly(trace)
-                            scores.append(score)
-                        except Exception as e:
-                            log_message(
-                                f"Error detecting anomaly for trace: {e}", "WARNING"
-                            )
-                            scores.append(0.0)  # Default score on error
-                else:
-                    # If no detector provided, use placeholder scores
-                    log_message(
-                        "No detector provided, using placeholder scores", "WARNING"
-                    )
-                    scores = [0.0] * len(df)  # Placeholder
+            # Use detector to get anomaly scores if provided
+            assert detector is not None, "Detector must be provided"
+            # Convert DataFrame to the format expected by detector
+            traces = df.to_dict("records")
+            scores = []
+            for trace in traces:
+                score = detector.detect_anomaly(trace)
+                scores.append(score)
 
-                all_scores.extend(scores)
-                all_labels.extend([label] * len(df))
-
-            except Exception as e:
-                log_message(f"Error loading {file_path}: {e}", "ERROR")
+            all_scores.extend(scores)
+            all_labels.extend([label] * len(df))
 
         return all_scores, all_labels
 
@@ -192,28 +171,22 @@ class ModelEvaluator:
         y_true = [0] * len(normal_scores) + [1] * len(anomaly_scores)
         y_scores = normal_scores + anomaly_scores
 
-        try:
-            fpr, tpr, _ = roc_curve(y_true, y_scores)
-            auc = roc_auc_score(y_true, y_scores)
-            plt.plot(fpr, tpr, label=f"ROC Curve (AUC = {auc:.3f})")
-            plt.plot([0, 1], [0, 1], "k--")
-            plt.xlabel("False Positive Rate")
-            plt.ylabel("True Positive Rate")
-            plt.title("ROC Curve")
-            plt.legend()
-        except ValueError:
-            plt.text(0.5, 0.5, "Unable to compute ROC curve", ha="center", va="center")
+        fpr, tpr, _ = roc_curve(y_true, y_scores)
+        auc = roc_auc_score(y_true, y_scores)
+        plt.plot(fpr, tpr, label=f"ROC Curve (AUC = {auc:.3f})")
+        plt.plot([0, 1], [0, 1], "k--")
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.title("ROC Curve")
+        plt.legend()
 
         # PR curve
         plt.subplot(2, 2, 4)
-        try:
-            precision, recall, _ = precision_recall_curve(y_true, y_scores)
-            plt.plot(recall, precision)
-            plt.xlabel("Recall")
-            plt.ylabel("Precision")
-            plt.title("Precision-Recall Curve")
-        except ValueError:
-            plt.text(0.5, 0.5, "Unable to compute PR curve", ha="center", va="center")
+        precision, recall, _ = precision_recall_curve(y_true, y_scores)
+        plt.plot(recall, precision)
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.title("Precision-Recall Curve")
 
         plt.tight_layout()
 

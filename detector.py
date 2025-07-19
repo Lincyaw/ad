@@ -116,8 +116,9 @@ class TraceAnomalyDetector:
             log_message("Training completed successfully.")
 
     def predict_score(self, df) -> List[Dict[str, Any]]:
-        if not self.is_trained or self.model is None:
-            raise RuntimeError("Model is not trained. Call fit() first.")
+        assert self.is_trained and self.model is not None, (
+            "Model is not trained. Call fit() first."
+        )
 
         self.model.eval()
         df_proc, features = self.processor.transform(df)
@@ -128,8 +129,9 @@ class TraceAnomalyDetector:
             for data in graphs:
                 data = data.to(self.config.device)
                 # Ensure data.x and data.edge_index are not None
-                if data.x is None or data.edge_index is None:
-                    continue
+                assert data.x is not None and data.edge_index is not None, (
+                    "Graph data missing node features or edge indices"
+                )
 
                 z = self.model.encode(data.x, data.edge_index)
 
@@ -156,14 +158,7 @@ class TraceAnomalyDetector:
     ) -> Dict[str, Any]:
         window_results = self.predict_score(df)
 
-        if not window_results:
-            return {
-                "has_anomaly": False,
-                "anomaly_score": 0.0,
-                "confidence": 0.0,
-                "num_windows": 0,
-                "aggregation_method": aggregation_method,
-            }
+        assert window_results, "No window results found for prediction"
 
         # Extract scores
         anomaly_scores = [r["anomaly_score"] for r in window_results]
@@ -186,7 +181,7 @@ class TraceAnomalyDetector:
             agg_struct = float(np.percentile(struct_errors, 95))
             agg_feat = float(np.percentile(feature_errors, 95))
         else:
-            raise ValueError(f"Unsupported aggregation method: {aggregation_method}")
+            assert False, f"Unsupported aggregation method: {aggregation_method}"
 
         # Calculate confidence (normalized consistency measure)
         if len(anomaly_scores) > 1:
@@ -232,8 +227,9 @@ class TraceAnomalyDetector:
 
     def predict_batch(self, df, batch_size: int = 32) -> List[Dict[str, Any]]:
         """Batch prediction for large datasets."""
-        if not self.is_trained or self.model is None:
-            raise RuntimeError("Model is not trained. Call fit() first.")
+        assert self.is_trained and self.model is not None, (
+            "Model is not trained. Call fit() first."
+        )
 
         self.model.eval()
         df_proc, features = self.processor.transform(df)
@@ -269,8 +265,9 @@ class TraceAnomalyDetector:
 
     def save(self, directory: str) -> None:
         """Save model and preprocessor."""
-        if not self.is_trained or self.model is None:
-            raise RuntimeError("Cannot save an untrained model.")
+        assert self.is_trained and self.model is not None, (
+            "Cannot save an untrained model."
+        )
 
         ensure_directory(directory)
 
@@ -288,9 +285,10 @@ class TraceAnomalyDetector:
     def load(cls, directory: str) -> "TraceAnomalyDetector":
         config = joblib.load(os.path.join(directory, "config.joblib"))
 
-        try:
-            trace_config = joblib.load(os.path.join(directory, "trace_config.joblib"))
-        except FileNotFoundError:
+        trace_config_path = os.path.join(directory, "trace_config.joblib")
+        if os.path.exists(trace_config_path):
+            trace_config = joblib.load(trace_config_path)
+        else:
             trace_config = TraceDataConfig()
 
         detector = cls(config, trace_config)
@@ -310,8 +308,7 @@ class TraceAnomalyDetector:
 
     def get_model_info(self) -> Dict[str, Any]:
         """Get model information."""
-        if not self.is_trained or self.model is None:
-            raise RuntimeError("Model is not trained.")
+        assert self.is_trained and self.model is not None, "Model is not trained."
 
         return {
             "config": self.config,

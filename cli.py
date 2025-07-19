@@ -1,17 +1,51 @@
 import typer
-from typing import Optional
 from pathlib import Path
 import pandas as pd
-from rich.console import Console
+from functools import partial
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
 from config import ModelConfig, TraceDataConfig
 from detector import TraceAnomalyDetector
 from evaluation import ModelEvaluator
-from utils import log_message, validate_trace_data
+from utils import validate_trace_data
 
-app = typer.Typer(help="Trace Anomaly Detection Tool")
-console = Console()
+app = typer.Typer(help="Trace Anomaly Detection Tool", pretty_exceptions_enable=False)
+
+
+def run_parallel_tasks(tasks, max_workers=8):
+    results = []
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {executor.submit(task): i for i, task in enumerate(tasks)}
+        with tqdm(total=len(tasks), desc="Processing files") as pbar:
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    result = future.result()
+                    results.append((index, result))
+                except Exception as e:
+                    print(f"Task {index} failed with error: {e}")
+                    results.append((index, {"error": str(e)}))
+                pbar.update(1)
+
+    results.sort(key=lambda x: x[0])
+    return [result for _, result in results]
+
+
+def process_test_file(test_file, label, model_path, aggregation):
+    detector = TraceAnomalyDetector.load(str(model_path))
+
+    test_df = pd.read_parquet(test_file)
+    validate_trace_data(test_df)
+
+    result = detector.predict_aggregated(test_df, aggregation_method=aggregation)
+
+    return {
+        "anomaly_score": result["anomaly_score"],
+        "label": label,
+        "file": str(test_file),
+    }
 
 
 @app.command()
@@ -25,25 +59,9 @@ def train(
     latent_dim: int = typer.Option(16, "--latent-dim", help="Latent space dimension"),
     batch_size: int = typer.Option(1, "--batch-size", help="Batch size"),
 ) -> None:
-    console.print("[blue]Starting model training...[/blue]")
+    df = pd.read_parquet(data)
 
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Loading training data...", total=None)
-            df = pd.read_parquet(data)
-            progress.update(task, description=f"Loaded {len(df)} records")
-        console.print(f"[green]✓[/green] Successfully loaded data: {len(df)} records")
-    except Exception as e:
-        console.print(f"[red]✗ Failed to load data: {e}[/red]")
-        raise typer.Exit(1)
-
-    if not validate_trace_data(df):
-        console.print("[red]✗ Data format validation failed[/red]")
-        raise typer.Exit(1)
+    validate_trace_data(df)  # This will assert if validation fails
 
     # Configure model
     config = ModelConfig(
@@ -56,134 +74,51 @@ def train(
 
     # Create detector and train
     detector = TraceAnomalyDetector(config, trace_config)
-
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Training model...", total=None)
-            detector.fit(df, verbose=True)
-            progress.update(task, description="Saving model...")
-            detector.save(str(output))
-        console.print("[green]✓ Model training completed successfully[/green]")
-    except Exception as e:
-        console.print(f"[red]✗ Model training failed: {e}[/red]")
-        raise typer.Exit(1)
+    detector.fit(df, verbose=True)
+    detector.save(str(output))
 
 
 @app.command()
 def evaluate(
     model: Path = Path("models"),
-    threshold: Optional[float] = typer.Option(None),
-    aggregation: str = typer.Option(
-        "max", help="Aggregation method: max, mean, percentile_95"
-    ),
+    aggregation: str = "max",  # max, mean, percentile_95
 ) -> None:
-    """Evaluate model performance with aggregated DataFrame-level predictions."""
     base_dir = Path("data/test")
 
     test_file_list = []
     for datapack in base_dir.iterdir():
-        if not datapack.is_dir():
-            continue
-
-        test_file_list.append((datapack / "normal_traces.parquet", 0))
-        test_file_list.append((datapack / "abnormal_traces.parquet", 1))
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Loading model...", total=None)
-        detector = TraceAnomalyDetector.load(str(model))
-    console.print("[green]✓ Model loaded successfully[/green]")
+        assert datapack.is_dir(), f"Expected directory but found file: {datapack}"
+        test_file_list.append((str(datapack / "normal_traces.parquet"), 0))
+        test_file_list.append((str(datapack / "abnormal_traces.parquet"), 1))
 
     all_scores = []
     all_labels = []
 
     evaluator = ModelEvaluator()
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        for i, (test_file, label) in enumerate(test_file_list):
-            test_df = pd.read_parquet(test_file)
-
-            if not validate_trace_data(test_df):
-                console.print(
-                    f"[red]✗ Data format validation failed for {test_file}[/red]"
-                )
-                continue
-
-            # Use aggregated prediction instead of window-level
-            result = detector.predict_aggregated(
-                test_df, aggregation_method=aggregation, threshold=threshold
-            )
-
-            all_scores.append(result["anomaly_score"])
-            all_labels.append(label)
-
-            console.print(
-                f"[blue]处理文件 ({i + 1}/{len(test_file_list)}) - "
-                f"{test_file.name}: Score={result['anomaly_score']:.2e}, "
-                f"Windows={result['num_windows']}, Confidence={result['confidence']:.4f}, "
-                f"Range=[{result['score_statistics']['min']:.2e}, {result['score_statistics']['max']:.2e}][/blue]"
-            )
-
-            # Show interim results if we have both classes
-            if len(set(all_labels)) > 1 and len(all_scores) > 0:
-                try:
-                    interim_results = evaluator.evaluate_with_threshold(
-                        all_scores, all_labels, threshold
-                    )
-                    console.print(
-                        f"[green]当前进度 ({i + 1}/{len(test_file_list)}) - "
-                        f"Precision: {interim_results['precision']:.4f}, "
-                        f"Recall: {interim_results['recall']:.4f}, "
-                        f"F1: {interim_results['f1_score']:.4f}[/green]"
-                    )
-                except Exception:
-                    pass
-
-    if not all_scores:
-        console.print("[red]✗ No valid data processed[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]✓ Total files processed: {len(all_scores)}[/green]")
-
-    # Final evaluation
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Computing final evaluation metrics...", total=None)
-
-        results = evaluator.evaluate_with_threshold(all_scores, all_labels, threshold)
-
-        # Display results
-        table = Table(
-            title=f"Aggregated Evaluation Results ({aggregation.upper()} method)"
+    tasks = [
+        partial(
+            process_test_file,
+            test_file,
+            label,
+            str(model),
+            aggregation,
         )
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="magenta")
+        for test_file, label in test_file_list
+    ]
 
-        table.add_row("Precision", f"{results['precision']:.4f}")
-        table.add_row("Recall", f"{results['recall']:.4f}")
-        table.add_row("F1-Score", f"{results['f1_score']:.4f}")
-        table.add_row("Accuracy", f"{results['accuracy']:.4f}")
-        table.add_row(
-            "AUC-ROC", f"{results['auc_score']:.4f}" if results["auc_score"] else "N/A"
-        )
-        table.add_row("Threshold", f"{results['threshold']:.4f}")
+    results = run_parallel_tasks(tasks, max_workers=4)
 
-        console.print(table)
-        progress.update(task, description="Evaluation completed")
+    for result in results:
+        if "error" in result:
+            continue
+
+        all_scores.append(result["anomaly_score"])
+        all_labels.append(result["label"])
+
+    assert all_scores, "No valid data processed"
+
+    results = evaluator.evaluate_with_threshold(all_scores, all_labels)
 
 
 if __name__ == "__main__":
